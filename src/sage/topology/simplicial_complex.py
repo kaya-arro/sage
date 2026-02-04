@@ -26,6 +26,9 @@ AUTHORS:
 - Jeremy Martin (2016-06-02): added cone_vertices, decone, is_balanced,
   is_partitionable, intersection methods
 
+- Kaya Arro (2026-02-03): added _is_contractible; improved efficiency of
+  intersection and _enlarge_subcomplex
+
 This module implements the basic structure of finite simplicial
 complexes. Given a set `V` of "vertices", a simplicial complex on `V`
 is a collection `K` of subsets of `V` satisfying the condition that if
@@ -161,6 +164,7 @@ We can also make mutable copies of an immutable simplicial complex
 from copy import copy
 from itertools import combinations, chain
 from functools import total_ordering
+from collections import deque
 
 from .cell_complex import GenericCellComplex
 from sage.categories.fields import Fields
@@ -3898,6 +3902,47 @@ class SimplicialComplex(Parent, GenericCellComplex):
         facets = [sorted(self._facets, key=str)[0]]
         return self._enlarge_subcomplex(SimplicialComplex(facets, is_mutable=False), verbose=verbose)
 
+
+    def _is_contractible(self):
+        """
+        Return ``True`` if and only if ``self`` is contractible.
+
+        EXAMPLES::
+
+            sage: X = SimplicialComplex([[0, 1], [1, 2], [3]])
+            sage: X._is_contractible()
+            False
+
+            sage: X = SimplicialComplex([[0, 1, 2], [1, 2, 3, 4, 5]])
+            sage: X._is_contractible()
+            True
+
+            sage: X = simplicial_complexes.Sphere(4)
+            sage: X._is_contractible()
+            False
+            sage: X._contractible_subcomplex()._is_contractible()
+            True
+        """
+        # The empty complex is not contractible
+        if self._facets[0].is_empty():
+            return False
+        # Single-facet complexes are contractible
+        elif len(self._facets) == 1:
+            return True
+        # Dimension 0 facets are their own connected components
+        elif any(facet.dimension() == 0 for facet in self._facets):
+            return False
+        # Are enough vertices shared between facets for connectedness?
+        elif sum(len(f.tuple()) for f in self._facets) + 1 \
+                < len(self._facets) + len(self._vertex_to_index):
+            return False
+        # 2-facet complexes with overlapping facets are contractible
+        elif len(self._facets) == 2:
+            return True
+        else:
+            return self == self._contractible_subcomplex()
+
+
     def _enlarge_subcomplex(self, subcomplex, verbose=False):
         """
         Given a subcomplex `S` of this simplicial complex `K`, find a
@@ -3948,32 +3993,39 @@ class SimplicialComplex(Parent, GenericCellComplex):
 
         if subcomplex in self.__enlarged:
             return self.__enlarged[subcomplex]
-        faces = [x for x in list(self._facets) if x not in subcomplex._facets]
-        # For consistency when using different Python versions, for example, sort 'faces'.
-        faces = sorted(faces, key=str)
-        done = False
+        # For consistency when using different Python versions, for example, sort 'to_check'.
+        to_check = deque(sorted((f for f in self._facets if f not in subcomplex._facets), key=str))
+        not_queued = list()
         new_facets = sorted(subcomplex._facets, key=str)
-        while not done:
-            done = True
-            remove_these = []
-            if verbose:
-                print(f"  looping through {len(faces)} facets")
-            for f in faces:
-                f_set = f.set()
-                int_facets = {a.set().intersection(f_set) for a in new_facets}
-                intersection = SimplicialComplex(int_facets)
-                if not intersection._facets[0].is_empty():
-                    if (len(intersection._facets) == 1 or
-                            intersection == intersection._contractible_subcomplex()):
-                        new_facets.append(f)
-                        remove_these.append(f)
-                        done = False
-            if verbose and not done:
-                print("    added %s facets" % len(remove_these))
-            for f in remove_these:
-                faces.remove(f)
+        facet_set = frozenset(self._facets)
+        nonfacet_idxs = [i for i in range(len(new_facets)) if new_facets[i] not in facet_set]
+        while len(to_check) > 0:
+            f = to_check.pop()
+            f_set = f.set()
+            int_faces = {a.set().intersection(f_set) for a in new_facets}
+            intersection = SimplicialComplex(int_faces)
+            if intersection._is_contractible():
+                # Remove faces that are no longer maximal in the enlarged subcomplex
+                # We start checking from the top of the stack for efficiency
+                for i in range(len(nonfacet_idxs) - 1, -1, -1):
+                    idx = nonfacet_idxs[i]
+                    # Faster to iterate over tuple than to use >= to compare sets
+                    if all(v in f_set for v in new_facets[idx].tuple()):
+                        new_facets.pop(idx)
+                        nonfacet_idxs.pop(i)
+                # Queue intersecting facets for checking
+                int_verts = frozenset(intersection.vertices())
+                for i in range(len(not_queued) - 1, -1, -1):
+                    if not int_verts.isdisjoint(not_queued[i].tuple()):
+                        to_check.appendleft(not_queued.pop(i))
+                # Add the facet to the enlarged subcomplex
+                new_facets.append(f)
+            else:
+                # We don't recheck facets unless necessary
+                not_queued.append(f)
         if verbose:
             print("  now constructing a simplicial complex with {} vertices and {} facets".format(len(self.vertices()), len(new_facets)))
+        # We removed non-maximal faces already so we don't recheck maximality
         L = SimplicialComplex(new_facets, maximality_check=False,
                               is_immutable=self._is_immutable)
         self.__enlarged[subcomplex] = L
@@ -4805,10 +4857,11 @@ class SimplicialComplex(Parent, GenericCellComplex):
             sage: X.intersection(Z) == Z
             True
         """
-        F = []
-        for k in range(1 + min(self.dimension(), other.dimension())):
-            F = F + [s for s in self.faces()[k] if s in other.faces()[k]]
-        return SimplicialComplex(F)
+        facet_intersections = set()
+        for f in self._facets:
+            f_set = f.set()
+            facet_intersections |= {f_set & g.set() for g in other._facets}
+        return SimplicialComplex(facet_intersections)
 
     def bigraded_betti_numbers(self, base_ring=ZZ, verbose=False):
         r"""
