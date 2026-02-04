@@ -3895,7 +3895,7 @@ class SimplicialComplex(Parent, GenericCellComplex):
              facets {(0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)}
             sage: L = sphere._contractible_subcomplex(); L
             Simplicial complex with vertex set (0, 1, 2, 3) and
-             facets {(0, 1, 2), (0, 1, 3), (0, 2, 3)}
+             facets {(0, 1, 2), (0, 2, 3), (1, 2, 3)}
             sage: L.homology()                                                          # needs sage.modules
             {0: 0, 1: 0, 2: 0}
         """
@@ -3979,9 +3979,9 @@ class SimplicialComplex(Parent, GenericCellComplex):
             {0: 0, 1: Z}
             sage: L = T._enlarge_subcomplex(S)
             sage: L
-            Simplicial complex with vertex set (0, 1, 2, 3, 4, 5, 6) and 8 facets
+            Simplicial complex with vertex set (0, 1, 2, 3, 4, 5, 6) and 6 facets
             sage: sorted(L.facets())
-            [(0, 1), (0, 1, 5), (0, 2), (0, 2, 6), (0, 3, 4), (0, 3, 5), (0, 4, 6), (1, 2)]
+            [(0, 1), (0, 2, 6), (1, 2, 4), (2, 3, 5), (2, 3, 6), (2, 4, 5)]
             sage: L.homology()[1]                                                       # needs sage.modules
             Z
         """
