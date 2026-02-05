@@ -3927,21 +3927,20 @@ class SimplicialComplex(Parent, GenericCellComplex):
         if self._facets[0].is_empty():
             return False
         # Single-facet complexes are contractible
-        elif len(self._facets) == 1:
+        elif (facets_len := len(self._facets)) == 1:
             return True
         # Dimension 0 facets are their own connected components
-        elif any(facet.dimension() == 0 for facet in self._facets):
+        elif any(len(facet.tuple()) == 1 for facet in self._facets):
             return False
         # Are enough vertices shared between facets for connectedness?
         elif sum(len(f.tuple()) for f in self._facets) + 1 \
-                < len(self._facets) + len(self._vertex_to_index):
+                < facets_len + len(self._vertex_to_index):
             return False
         # 2-facet complexes with overlapping facets are contractible
-        elif len(self._facets) == 2:
+        elif facets_len == 2:
             return True
         else:
             return self == self._contractible_subcomplex()
-
 
     def _enlarge_subcomplex(self, subcomplex, verbose=False):
         """
@@ -3998,25 +3997,24 @@ class SimplicialComplex(Parent, GenericCellComplex):
         not_queued = list()
         new_facets = sorted(subcomplex._facets, key=str)
         facet_set = frozenset(self._facets)
+        # Facets of subcomplex that aren't facets of supercomplex; we may need to remove these
         nonfacet_idxs = [i for i in range(len(new_facets)) if new_facets[i] not in facet_set]
         while len(to_check) > 0:
             f = to_check.pop()
             f_set = f.set()
-            int_faces = {a.set().intersection(f_set) for a in new_facets}
-            intersection = SimplicialComplex(int_faces)
+            intersection = SimplicialComplex({a.set().intersection(f_set) for a in new_facets})
             if intersection._is_contractible():
                 # Remove faces that are no longer maximal in the enlarged subcomplex
-                # We start checking from the top of the stack for efficiency
+                # Start checking from the top of the stack for efficiency
                 for i in range(len(nonfacet_idxs) - 1, -1, -1):
                     idx = nonfacet_idxs[i]
-                    # Faster to iterate over tuple than to use >= to compare sets
-                    if all(v in f_set for v in new_facets[idx].tuple()):
+                    if new_facets[idx].is_face(f):
                         new_facets.pop(idx)
                         nonfacet_idxs.pop(i)
-                # Queue intersecting facets for checking
+                # Queue facets for checking if their intersection with the subcomplex changed
                 int_verts = frozenset(intersection.vertices())
                 for i in range(len(not_queued) - 1, -1, -1):
-                    if not int_verts.isdisjoint(not_queued[i].tuple()):
+                    if not not_queued[i].set().isdisjoint(int_verts):
                         to_check.appendleft(not_queued.pop(i))
                 # Add the facet to the enlarged subcomplex
                 new_facets.append(f)
@@ -4862,6 +4860,7 @@ class SimplicialComplex(Parent, GenericCellComplex):
             f_set = f.set()
             facet_intersections |= {f_set & g.set() for g in other._facets}
         return SimplicialComplex(facet_intersections)
+
 
     def bigraded_betti_numbers(self, base_ring=ZZ, verbose=False):
         r"""
