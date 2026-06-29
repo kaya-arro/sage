@@ -4830,10 +4830,11 @@ class SimplicialComplex(Parent, GenericCellComplex):
             sage: X.intersection(Z) == Z
             True
         """
-        F = []
-        for k in range(1 + min(self.dimension(), other.dimension())):
-            F = F + [s for s in self.faces()[k] if s in other.faces()[k]]
-        return SimplicialComplex(F)
+        facet_intersections = set()
+        for f in self._facets:
+            f_set = f.set()
+            facet_intersections |= {f_set & g.set() for g in other._facets}
+        return SimplicialComplex(facet_intersections)
 
     def bigraded_betti_numbers(self, base_ring=ZZ, verbose=False):
         r"""
